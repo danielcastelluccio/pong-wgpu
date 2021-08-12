@@ -12,10 +12,10 @@ struct PaddleRaw {
 }
 
 const VERTICES: &[Vertex] = &[
-    Vertex { position: [0.05, -0.05, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
-    Vertex { position: [0.05, 0.05, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
-    Vertex { position: [-0.05, -0.05, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
-    Vertex { position: [-0.05, 0.05, 0.0], color: [0.0, 1.0, 0.0, 1.0] }
+    Vertex { position: [0.05, -0.1, 0.0], color: [0.9, 0.9, 0.9, 1.0] },
+    Vertex { position: [0.05, 0.1, 0.0], color: [0.9, 0.9, 0.9, 1.0] },
+    Vertex { position: [-0.05, -0.1, 0.0], color: [0.9, 0.9, 0.9, 1.0] },
+    Vertex { position: [-0.05, 0.1, 0.0], color: [0.9, 0.9, 0.9, 1.0] }
 ];
 
 const INDICES: &[u16] = &[
@@ -183,25 +183,28 @@ impl PongState {
         self.swap_chain = self.device.create_swap_chain(&self.surface, &self.swap_chain_descriptor);
     }
 
-    fn update(&mut self) {
+    fn update(&mut self, delta_time: std::time::Duration) {
         let mut changed = false;
 
+        let movement_amount = delta_time.as_millis() as f32 * 0.002;
+
         if self.pressed_keycodes.contains(&winit::event::VirtualKeyCode::Up)  {
-            self.instance_data[1].position[1] += 0.025;
+            self.instance_data[1].position[1] += movement_amount;
             changed = true;
         }
         if self.pressed_keycodes.contains(&winit::event::VirtualKeyCode::Down) {
-            self.instance_data[1].position[1] -= 0.025;
+            self.instance_data[1].position[1] -= movement_amount;
             changed = true;
         }
         if self.pressed_keycodes.contains(&winit::event::VirtualKeyCode::W) {
-            self.instance_data[0].position[1] += 0.025;
+            self.instance_data[0].position[1] += movement_amount;
             changed = true;
         }
         if self.pressed_keycodes.contains(&winit::event::VirtualKeyCode::S) {
-            self.instance_data[0].position[1] -= 0.025;
+            self.instance_data[0].position[1] -= movement_amount;
             changed = true;
         }
+        //println!("{} {:?}", changed, self.instance_data[0]);
         
         if changed {
             let instance_buffer_raw = bytemuck::cast_slice(&self.instance_data);
@@ -214,12 +217,19 @@ impl PongState {
     }
     
     fn input(&mut self, input: winit::event::KeyboardInput) {
-        if input.state == winit::event::ElementState::Pressed {
-            self.pressed_keycodes.push(input.virtual_keycode.unwrap());
-        }
-        if input.state == winit::event::ElementState::Released {
-            let keycode_index = self.pressed_keycodes.iter().position(|&r| r == input.virtual_keycode.unwrap()).unwrap();
-            self.pressed_keycodes.remove(keycode_index);
+        if let Some(keycode) = input.virtual_keycode {
+            if input.state == winit::event::ElementState::Pressed {
+                if !self.pressed_keycodes.contains(&keycode) {
+                    self.pressed_keycodes.push(keycode);
+                }
+                
+            }
+            if input.state == winit::event::ElementState::Released {
+                let keycode_index = self.pressed_keycodes.iter().position(|&r| r == keycode);
+                if let Some(keycode_index) = keycode_index {
+                    self.pressed_keycodes.remove(keycode_index);
+                }
+            }
         }
     }
     
@@ -239,7 +249,7 @@ impl PongState {
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 1.0,
+                                r: 0.0,
                                 g: 0.0,
                                 b: 0.0,
                                 a: 1.0
@@ -269,6 +279,8 @@ fn main() {
     let window = winit::window::WindowBuilder::new().build(&event_loop).unwrap();
     
     let mut state = pollster::block_on(PongState::new(&window));
+
+    let mut previous_frame_time = std::time::Instant::now();
     
     event_loop.run( move |event, _, control_flow| {
         match event {
@@ -286,8 +298,11 @@ fn main() {
             },
             winit::event::Event::MainEventsCleared => window.request_redraw(),
             winit::event::Event::RedrawRequested(_) => {
-                state.update();
-                state.render()
+                let frame_time = std::time::Instant::now();
+                let delta_time = frame_time - previous_frame_time;
+                state.update(delta_time);
+                state.render();
+                previous_frame_time = frame_time;
             }
             _ => {}
         }
