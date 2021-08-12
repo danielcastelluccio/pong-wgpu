@@ -5,10 +5,21 @@ struct Vertex {
     color: [f32; 4]
 }
 
-const VERTICES: &[Vertex]= &[
-    Vertex { position: [1.0, -1.0, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
-    Vertex { position: [1.0, 1.0, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
-    Vertex { position: [-1.0, -1.0, 0.0], color: [0.0, 1.0, 0.0, 1.0] }
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct PaddleRaw {
+    position: [f32; 3]
+}
+
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [0.05, -0.05, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
+    Vertex { position: [0.05, 0.05, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
+    Vertex { position: [-0.05, -0.05, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
+    Vertex { position: [-0.05, 0.05, 0.0], color: [0.0, 1.0, 0.0, 1.0] }
+];
+
+const INDICES: &[u16] = &[
+    0, 1, 2, 3, 2, 1
 ];
 
 struct PongState {
@@ -18,7 +29,11 @@ struct PongState {
     swap_chain_descriptor: wgpu::SwapChainDescriptor,
     swap_chain: wgpu::SwapChain,
     vertex_buffer: wgpu::Buffer,
-    render_pipeline: wgpu::RenderPipeline
+    index_buffer: wgpu::Buffer,
+    render_pipeline: wgpu::RenderPipeline,
+    instance_data: [PaddleRaw; 2],
+    instance_buffer: wgpu::Buffer,
+    pressed_keycodes: Vec<winit::event::VirtualKeyCode>
 }
 
 impl PongState {
@@ -82,13 +97,44 @@ impl PongState {
             usage: wgpu::BufferUsage::VERTEX
         });
 
+        let index_buffer_raw = bytemuck::cast_slice(INDICES);
+        let index_buffer = wgpu::util::DeviceExt::create_buffer_init(&device, &wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: index_buffer_raw,
+            usage: wgpu::BufferUsage::INDEX
+        });
+
+        let instance_positions_descriptor = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<PaddleRaw>() as u64,
+            step_mode: wgpu::InputStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x3,
+                    offset: 0,
+                    shader_location: 2
+                }
+            ]
+        };
+
+        let instance_data = [
+            PaddleRaw { position: [-0.9, 0.0, 0.0] },
+            PaddleRaw { position: [0.9, 0.0, 0.0] }
+        ];
+
+        let instance_buffer_raw = bytemuck::cast_slice(&instance_data);
+        let instance_buffer = wgpu::util::DeviceExt::create_buffer_init(&device, &wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: instance_buffer_raw,
+            usage: wgpu::BufferUsage::VERTEX
+        });
+
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader_module,
                 entry_point: "main",
-                buffers: &[vertex_descriptor]
+                buffers: &[vertex_descriptor, instance_positions_descriptor]
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -123,7 +169,11 @@ impl PongState {
             swap_chain_descriptor,
             swap_chain,
             vertex_buffer,
-            render_pipeline
+            index_buffer,
+            render_pipeline,
+            instance_data,
+            instance_buffer,
+            pressed_keycodes: Vec::new(),
         }
     }
 
@@ -131,6 +181,46 @@ impl PongState {
         self.swap_chain_descriptor.width = size.width;
         self.swap_chain_descriptor.height = size.height;
         self.swap_chain = self.device.create_swap_chain(&self.surface, &self.swap_chain_descriptor);
+    }
+
+    fn update(&mut self) {
+        let mut changed = false;
+
+        if self.pressed_keycodes.contains(&winit::event::VirtualKeyCode::Up)  {
+            self.instance_data[1].position[1] += 0.025;
+            changed = true;
+        }
+        if self.pressed_keycodes.contains(&winit::event::VirtualKeyCode::Down) {
+            self.instance_data[1].position[1] -= 0.025;
+            changed = true;
+        }
+        if self.pressed_keycodes.contains(&winit::event::VirtualKeyCode::W) {
+            self.instance_data[0].position[1] += 0.025;
+            changed = true;
+        }
+        if self.pressed_keycodes.contains(&winit::event::VirtualKeyCode::S) {
+            self.instance_data[0].position[1] -= 0.025;
+            changed = true;
+        }
+        
+        if changed {
+            let instance_buffer_raw = bytemuck::cast_slice(&self.instance_data);
+            self.instance_buffer = wgpu::util::DeviceExt::create_buffer_init(&self.device, &wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: instance_buffer_raw,
+                usage: wgpu::BufferUsage::VERTEX
+            });
+        }
+    }
+    
+    fn input(&mut self, input: winit::event::KeyboardInput) {
+        if input.state == winit::event::ElementState::Pressed {
+            self.pressed_keycodes.push(input.virtual_keycode.unwrap());
+        }
+        if input.state == winit::event::ElementState::Released {
+            let keycode_index = self.pressed_keycodes.iter().position(|&r| r == input.virtual_keycode.unwrap()).unwrap();
+            self.pressed_keycodes.remove(keycode_index);
+        }
     }
     
     fn render(&self) {
@@ -163,7 +253,9 @@ impl PongState {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.draw(0..3, 0..1);
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..INDICES.len() as u32, 0, 0..2);
         }
         
         self.queue.submit(std::iter::once(command_encoder.finish()));
@@ -185,11 +277,18 @@ fn main() {
                 match event {
                     winit::event::WindowEvent::CloseRequested => *control_flow = winit::event_loop::ControlFlow::Exit,
                     winit::event::WindowEvent::Resized(size) => state.resize(size),
+                    winit::event::WindowEvent::KeyboardInput {
+                        input,
+                        ..
+                    } => state.input(input),
                     _ => {}
                 }
             },
             winit::event::Event::MainEventsCleared => window.request_redraw(),
-            winit::event::Event::RedrawRequested(_) => state.render(),
+            winit::event::Event::RedrawRequested(_) => {
+                state.update();
+                state.render()
+            }
             _ => {}
         }
     });

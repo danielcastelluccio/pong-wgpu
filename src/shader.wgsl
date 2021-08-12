@@ -1,6 +1,7 @@
 struct VertexInput {
     [[location(0)]] position: vec3<f32>;
     [[location(1)]] color: vec4<f32>;
+    [[location(2)]] instance_position: vec3<f32>;
 };
 
 struct FragmentInput {
@@ -11,7 +12,7 @@ struct FragmentInput {
 [[stage(vertex)]]
 fn main(in: VertexInput) -> FragmentInput {
     var fragment_input: FragmentInput;
-    fragment_input.clip_position = vec4<f32>(in.position, 1.0);
+    fragment_input.clip_position = vec4<f32>(in.position + in.instance_position, 1.0);
     fragment_input.color = in.color;
     return fragment_input;
 };
