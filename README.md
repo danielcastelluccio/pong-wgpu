@@ -1,3 +1,6 @@
+# Pong
+Pong clone so I can practice getting better at wgpu. Very good game.
+
 ## Testing
 ``
 cargo run

@@ -79,6 +79,7 @@ struct PongState {
     ball_direction: cgmath::Deg<f32>,
     rectangle_index_buffer: wgpu::Buffer,
     pressed_keycodes: Vec<winit::event::VirtualKeyCode>,
+    score_transform_instance_buffer: wgpu::Buffer,
     
     score: (u32, u32),
     ball_speed: f32,
@@ -217,6 +218,15 @@ impl PongState {
             },
         );
 
+        let score_transform_instance_buffer = wgpu::util::DeviceExt::create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Score Instance Buffer"),
+                contents: &[],
+                usage: wgpu::BufferUsage::VERTEX
+            }
+        );
+
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&pipeline_layout),
@@ -269,6 +279,7 @@ impl PongState {
             ball_direction: cgmath::Deg(80.0),
             rectangle_index_buffer,
             pressed_keycodes: Vec::new(),
+            score_transform_instance_buffer,
             score: (0, 0),
             ball_speed: 1.0
         }
@@ -323,15 +334,7 @@ impl PongState {
             self.paddle_instance_data[0].position[1].clamp(-0.85, 0.85);
 
         if changed {
-            let paddle_instance_buffer_raw = bytemuck::cast_slice(&self.paddle_instance_data);
-            self.paddle_instance_buffer = wgpu::util::DeviceExt::create_buffer_init(
-                &self.wgpu_state.device,
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("Instance Buffer"),
-                    contents: paddle_instance_buffer_raw,
-                    usage: wgpu::BufferUsage::VERTEX,
-                },
-            );
+            self.set_paddle_buffer();
         }
 
         let x_change = cgmath::Angle::sin(self.ball_direction) * 0.01 * self.ball_speed;
@@ -371,19 +374,55 @@ impl PongState {
 
         if self.ball_transform_data.x > 0.975 {
             self.score.0 += 1;
-            self.reset_ball();
+            self.on_score();
         } else if self.ball_transform_data.x < -0.975 {
             self.score.1 += 1;
-            self.reset_ball();
+            self.on_score();
         }
 
         self.ball_speed += delta_time.as_millis() as f32 / 3000.0;
-        println!("{}", self.ball_speed);
     }
 
-    fn reset_ball(&mut self) {
+    fn on_score(&mut self) {
+        self.reset_objects();
+
+        let mut buffer_data: [[f32; 3]; 10] = [[2.0, 2.0, 0.0]; 10];
+        for i in 0..self.score.0 {
+            buffer_data[i as usize] = [-0.9 + i as f32 / 15.0, 0.85, 0.0];
+        }
+        for i in 0..self.score.1 {
+            buffer_data[i as usize + self.score.0 as usize] = [0.9 - i as f32 / 15.0, 0.85, 0.0];
+        }
+        
+        self.score_transform_instance_buffer = wgpu::util::DeviceExt::create_buffer_init(&self.wgpu_state.device, &wgpu::util::BufferInitDescriptor {
+            label: Some("Score Transform Buffer"),
+            contents: bytemuck::cast_slice::<[f32; 3], u8>(&buffer_data),
+            usage: wgpu::BufferUsage::VERTEX
+        });
+
+        if self.score.0 == 5 || self.score.1 == 5 {
+            self.score = (0, 0);
+        }
+    }
+
+    fn reset_objects(&mut self) {
         self.ball_transform_data = Vector2::new(0.0, 0.0);
         self.ball_speed = 1.0;
+        self.paddle_instance_data[0].position[1] = 0.0;
+        self.paddle_instance_data[1].position[1] = 0.0;
+        self.set_paddle_buffer();
+    }
+
+    fn set_paddle_buffer(&mut self) {
+        let paddle_instance_buffer_raw = bytemuck::cast_slice(&self.paddle_instance_data);
+        self.paddle_instance_buffer = wgpu::util::DeviceExt::create_buffer_init(
+            &self.wgpu_state.device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: paddle_instance_buffer_raw,
+                usage: wgpu::BufferUsage::VERTEX,
+            },
+        );
     }
 
     fn randomize_direction(direction: &mut Deg<f32>) {
@@ -448,6 +487,9 @@ impl PongState {
             render_pass.set_vertex_buffer(0, self.ball_vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.ball_transform_buffer.slice(..));
             render_pass.draw_indexed(0..RECTANGLE_INDICES.len() as u32, 0, 0..1);
+            
+            render_pass.set_vertex_buffer(1, self.score_transform_instance_buffer.slice(..));
+            render_pass.draw_indexed(0..RECTANGLE_INDICES.len() as u32, 0, 0..self.score.0 + self.score.1);
         }
 
         wgpu_state
