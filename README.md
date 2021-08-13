@@ -1,5 +1,5 @@
 # Pong
-Pong clone so I can practice getting better at wgpu. Very good game.
+Pong clone so I can practice getting better at wgpu. Very good game. A lot of implementation related stuff is really hacky, did this more to get myself used to the base wgpu api.
 
 ## Testing
 ``
