@@ -1,6 +1,11 @@
 use cgmath::{Deg, Vector2};
 use rand::Rng;
 
+#[cfg(not(target_arch = "wasm32"))]
+const BACKEND_BITS: wgpu::BackendBit = wgpu::BackendBit::PRIMARY;
+#[cfg(target_arch = "wasm32")]
+const BACKEND_BITS: wgpu::BackendBit = wgpu::BackendBit::all();
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -79,7 +84,7 @@ struct PongState {
 impl PongState {
     async fn new(window: &winit::window::Window) -> Self {
         let size = window.inner_size();
-        let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+        let instance = wgpu::Instance::new(BACKEND_BITS);
         let surface = unsafe { instance.create_surface(window) };
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -105,7 +110,7 @@ impl PongState {
             format: adapter.get_swap_chain_preferred_format(&surface).unwrap(),
             width: size.width,
             height: size.height,
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode: wgpu::PresentMode::Mailbox,
         };
         let swap_chain = device.create_swap_chain(&surface, &swap_chain_descriptor);
 
@@ -306,9 +311,11 @@ impl PongState {
             self.paddle_instance_data[0].position[1] -= movement_amount;
             changed = true;
         }
-        
-        self.paddle_instance_data[1].position[1] = self.paddle_instance_data[1].position[1].clamp(-0.85, 0.85);
-        self.paddle_instance_data[0].position[1] = self.paddle_instance_data[0].position[1].clamp(-0.85, 0.85);
+
+        self.paddle_instance_data[1].position[1] =
+            self.paddle_instance_data[1].position[1].clamp(-0.85, 0.85);
+        self.paddle_instance_data[0].position[1] =
+            self.paddle_instance_data[0].position[1].clamp(-0.85, 0.85);
 
         if changed {
             let paddle_instance_buffer_raw = bytemuck::cast_slice(&self.paddle_instance_data);
@@ -428,17 +435,10 @@ impl PongState {
     }
 }
 
-fn main() {
-    env_logger::init();
+async fn run(event_loop: winit::event_loop::EventLoop<()>, window: winit::window::Window) {
+    let mut state = PongState::new(&window).await;
 
-    let event_loop = winit::event_loop::EventLoop::new();
-    let window = winit::window::WindowBuilder::new()
-        .build(&event_loop)
-        .unwrap();
-
-    let mut state = pollster::block_on(PongState::new(&window));
-
-    let mut previous_frame_time = std::time::Instant::now();
+    let mut previous_frame_time = instant::Instant::now();
 
     event_loop.run(move |event, _, control_flow| match event {
         winit::event::Event::WindowEvent { event, .. } => match event {
@@ -451,7 +451,7 @@ fn main() {
         },
         winit::event::Event::MainEventsCleared => window.request_redraw(),
         winit::event::Event::RedrawRequested(_) => {
-            let frame_time = std::time::Instant::now();
+            let frame_time = instant::Instant::now();
             let delta_time = frame_time - previous_frame_time;
             state.update(delta_time);
             state.render();
@@ -459,4 +459,30 @@ fn main() {
         }
         _ => {}
     });
+}
+
+fn main() {
+    let event_loop = winit::event_loop::EventLoop::new();
+    let window = winit::window::Window::new(&event_loop).unwrap();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        env_logger::init();
+        pollster::block_on(run(event_loop, window));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+        console_log::init().expect("could not initialize logger");
+        use winit::platform::web::WindowExtWebSys;
+        // On wasm, append the canvas to the document body
+        web_sys::window()
+            .and_then(|win| win.document())
+            .and_then(|doc| doc.body())
+            .and_then(|body| {
+                body.append_child(&web_sys::Element::from(window.canvas()))
+                    .ok()
+            })
+            .expect("couldn't append canvas to document body");
+        wasm_bindgen_futures::spawn_local(run(event_loop, window));
+    }
 }
