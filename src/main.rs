@@ -79,6 +79,9 @@ struct PongState {
     ball_direction: cgmath::Deg<f32>,
     rectangle_index_buffer: wgpu::Buffer,
     pressed_keycodes: Vec<winit::event::VirtualKeyCode>,
+    
+    score: (u32, u32),
+    ball_speed: f32,
 }
 
 impl PongState {
@@ -266,6 +269,8 @@ impl PongState {
             ball_direction: cgmath::Deg(80.0),
             rectangle_index_buffer,
             pressed_keycodes: Vec::new(),
+            score: (0, 0),
+            ball_speed: 1.0
         }
     }
 
@@ -329,8 +334,8 @@ impl PongState {
             );
         }
 
-        let x_change = cgmath::Angle::sin(self.ball_direction) * 0.01;
-        let y_change = cgmath::Angle::cos(self.ball_direction) * 0.01;
+        let x_change = cgmath::Angle::sin(self.ball_direction) * 0.01 * self.ball_speed;
+        let y_change = cgmath::Angle::cos(self.ball_direction) * 0.01 * self.ball_speed;
         self.ball_transform_data += cgmath::Vector2::new(x_change, y_change);
         let ball_transform_data_raw = [self.ball_transform_data.x, self.ball_transform_data.y, 0.0];
         let ball_transform_buffer_raw = bytemuck::cast_slice(&ball_transform_data_raw);
@@ -363,6 +368,22 @@ impl PongState {
                 PongState::randomize_direction(&mut self.ball_direction);
             }
         }
+
+        if self.ball_transform_data.x > 0.975 {
+            self.score.0 += 1;
+            self.reset_ball();
+        } else if self.ball_transform_data.x < -0.975 {
+            self.score.1 += 1;
+            self.reset_ball();
+        }
+
+        self.ball_speed += delta_time.as_millis() as f32 / 3000.0;
+        println!("{}", self.ball_speed);
+    }
+
+    fn reset_ball(&mut self) {
+        self.ball_transform_data = Vector2::new(0.0, 0.0);
+        self.ball_speed = 1.0;
     }
 
     fn randomize_direction(direction: &mut Deg<f32>) {
